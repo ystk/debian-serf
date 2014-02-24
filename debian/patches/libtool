@@ -1,6 +1,6 @@
 --- a/configure.in
 +++ b/configure.in
-@@ -192,9 +192,9 @@
+@@ -199,9 +199,9 @@ AC_SEARCH_LIBS(fabs, m)
  
  libs=""
  if test -n "$apu_config"; then

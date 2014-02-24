@@ -44,7 +44,7 @@ typedef struct {
 } response_context_t;
 
 
-SERF_DECLARE(serf_bucket_t *) serf_bucket_response_create(
+serf_bucket_t *serf_bucket_response_create(
     serf_bucket_t *stream,
     serf_bucket_alloc_t *allocator)
 {
@@ -63,7 +63,7 @@ SERF_DECLARE(serf_bucket_t *) serf_bucket_response_create(
     return serf_bucket_create(&serf_bucket_type_response, allocator, ctx);
 }
 
-SERF_DECLARE(void) serf_bucket_response_set_head(
+void serf_bucket_response_set_head(
     serf_bucket_t *bucket)
 {
     response_context_t *ctx = bucket->data;
@@ -71,7 +71,7 @@ SERF_DECLARE(void) serf_bucket_response_set_head(
     ctx->head_req = 1;
 }
 
-SERF_DECLARE(serf_bucket_t *) serf_bucket_response_get_headers(
+serf_bucket_t *serf_bucket_response_get_headers(
     serf_bucket_t *bucket)
 {
     return ((response_context_t *)bucket->data)->headers;
@@ -109,7 +109,7 @@ static apr_status_t parse_status_line(response_context_t *ctx,
     res = apr_date_checkmask(ctx->linebuf.line, "HTTP/#.# ###*");
     if (!res) {
         /* Not an HTTP response?  Well, at least we won't understand it. */
-        return APR_EGENERAL;
+        return SERF_ERROR_BAD_HTTP_RESPONSE;
     }
 
     ctx->sl.version = SERF_HTTP_VERSION(ctx->linebuf.line[5] - '0',
@@ -150,12 +150,20 @@ static apr_status_t fetch_headers(serf_bucket_t *bkt, response_context_t *ctx)
         end_key = c = memchr(ctx->linebuf.line, ':', ctx->linebuf.used);
         if (!c) {
             /* Bad headers? */
-            return APR_EGENERAL;
+            return SERF_ERROR_BAD_HTTP_RESPONSE;
         }
 
-        /* Skip over initial : and spaces. */
-        while (apr_isspace(*++c))
-            continue;
+        /* Skip over initial ':' */
+        c++;
+
+        /* And skip all whitespaces. */
+        for(; c < ctx->linebuf.line + ctx->linebuf.used; c++)
+        {
+            if (!apr_isspace(*c))
+            {
+              break;
+            }
+        }
 
         /* Always copy the headers (from the linebuf into new mem). */
         /* ### we should be able to optimize some mem copies */
@@ -194,6 +202,14 @@ static apr_status_t run_machine(serf_bucket_t *bkt, response_context_t *ctx)
             status = parse_status_line(ctx, bkt->allocator);
             if (status)
                 return status;
+
+            /* Good times ahead: we're switching protocols! */
+            if (ctx->sl.code == 101) {
+                ctx->body =
+                    serf_bucket_barrier_create(ctx->stream, bkt->allocator);
+                ctx->state = STATE_DONE;
+                break;
+            }
 
             /* Okay... move on to reading the headers. */
             ctx->state = STATE_HEADERS;
@@ -313,7 +329,7 @@ static apr_status_t wait_for_body(serf_bucket_t *bkt, response_context_t *ctx)
     return APR_SUCCESS;
 }
 
-SERF_DECLARE(apr_status_t) serf_bucket_response_wait_for_headers(
+apr_status_t serf_bucket_response_wait_for_headers(
     serf_bucket_t *bucket)
 {
     response_context_t *ctx = bucket->data;
@@ -321,7 +337,7 @@ SERF_DECLARE(apr_status_t) serf_bucket_response_wait_for_headers(
     return wait_for_body(bucket, ctx);
 }
 
-SERF_DECLARE(apr_status_t) serf_bucket_response_status(
+apr_status_t serf_bucket_response_status(
     serf_bucket_t *bkt,
     serf_status_line *sline)
 {
@@ -401,7 +417,7 @@ static apr_status_t serf_response_readline(serf_bucket_t *bucket,
 /* ### need to implement */
 #define serf_response_peek NULL
 
-SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_response = {
+const serf_bucket_type_t serf_bucket_type_response = {
     "RESPONSE",
     serf_response_read,
     serf_response_readline,
@@ -410,7 +426,4 @@ SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_response = {
     serf_default_read_bucket,
     serf_response_peek,
     serf_response_destroy_and_data,
-    serf_default_snapshot,
-    serf_default_restore_snapshot,
-    serf_default_is_snapshot_set,
 };

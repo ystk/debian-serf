@@ -16,6 +16,7 @@
 #include <apr.h>
 #include <apr_pools.h>
 #include <apr_strings.h>
+#include <apr_env.h>
 
 #include "serf.h"
 #include "serf_bucket_types.h"
@@ -28,32 +29,61 @@
 #include <openssl/applink.c>
 #endif
 
+/* Test setting up the openssl library. */
+static void test_ssl_init(CuTest *tc)
+{
+    serf_bucket_t *bkt, *stream;
+    serf_ssl_context_t *ssl_context;
+    apr_status_t status;
+
+    apr_pool_t *test_pool = test_setup();
+    serf_bucket_alloc_t *alloc = serf_bucket_allocator_create(test_pool, NULL,
+                                                              NULL);
+
+    stream = SERF_BUCKET_SIMPLE_STRING("", alloc);
+
+    bkt = serf_bucket_ssl_decrypt_create(stream, NULL,
+                                         alloc);
+    ssl_context = serf_bucket_ssl_decrypt_context_get(bkt);
+
+    bkt = serf_bucket_ssl_encrypt_create(stream, ssl_context,
+                                         alloc);
+
+    status = serf_ssl_use_default_certificates(ssl_context);
+
+    CuAssertIntEquals(tc, APR_SUCCESS, status);
+    test_teardown(test_pool);
+}
+
 /* Test that loading a custom CA certificate file works. */
 static void test_ssl_load_cert_file(CuTest *tc)
 {
     serf_ssl_certificate_t *cert = NULL;
+
+    apr_pool_t *test_pool = test_setup();
     apr_status_t status = serf_ssl_load_cert_file(&cert, "test/serftestca.pem",
                                                   test_pool);
 
     CuAssertIntEquals(tc, APR_SUCCESS, status);
     CuAssertPtrNotNull(tc, cert);
+    test_teardown(test_pool);
 }
 
 /* Test that reading a custom CA certificate file works. */
 static void test_ssl_cert_subject(CuTest *tc)
 {
-    apr_pool_t *subpool;
     apr_hash_t *subject;
     serf_ssl_certificate_t *cert = NULL;
     apr_status_t status;
 
-    apr_pool_create(&subpool, test_pool);
-    status = serf_ssl_load_cert_file(&cert, "test/serftestca.pem", subpool);
+    apr_pool_t *test_pool = test_setup();
+
+    status = serf_ssl_load_cert_file(&cert, "test/serftestca.pem", test_pool);
 
     CuAssertIntEquals(tc, APR_SUCCESS, status);
     CuAssertPtrNotNull(tc, cert);
 
-    subject = serf_ssl_cert_subject(cert, subpool);
+    subject = serf_ssl_cert_subject(cert, test_pool);
     CuAssertStrEquals(tc, "Test Suite", 
                       apr_hash_get(subject, "OU", APR_HASH_KEY_STRING));
     CuAssertStrEquals(tc, "In Serf we trust, Inc.", 
@@ -67,13 +97,14 @@ static void test_ssl_cert_subject(CuTest *tc)
     CuAssertStrEquals(tc, "serf@example.com", 
                       apr_hash_get(subject, "E", APR_HASH_KEY_STRING));
 
-    apr_pool_destroy(subpool);
+    test_teardown(test_pool);
 }
 
 CuSuite *test_ssl(void)
 {
     CuSuite *suite = CuSuiteNew();
 
+    SUITE_ADD_TEST(suite, test_ssl_init);
     SUITE_ADD_TEST(suite, test_ssl_load_cert_file);
     SUITE_ADD_TEST(suite, test_ssl_cert_subject);
 

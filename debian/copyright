@@ -1,6 +1,6 @@
 This package was debianized by:
   Noritada Kobayashi <nori1@dolphin.c.u-tokyo.ac.jp> on 2006-12-21
-The current maintainer is Peter Samuelson <peter@p12n.org>.
+The current maintainer is Peter Samuelson <peters@p12n.org>.
 
 It was downloaded from:
   http://code.google.com/p/serf/
@@ -12,7 +12,7 @@ Upstream Authors:
 
 Most of the code is:
 
-  Copyright 2002-2008 Justin Erenkrantz and Greg Stein
+  Copyright 2002-2011 by Justin Erenkrantz and Greg Stein
   Copyright 2005 The Apache Software Foundation or its licensors, as
   applicable.
 

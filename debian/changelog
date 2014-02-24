@@ -1,3 +1,69 @@
+serf (1.1.0-2) unstable; urgency=low
+
+  * Upload to unstable.
+  * Add another lintian override.
+  * Make libserf1-dbg M-A: same as well.
+
+ -- Peter Samuelson <peter@p12n.org>  Sat, 09 Jun 2012 14:26:56 -0500
+
+serf (1.1.0-1) experimental; urgency=low
+
+  * New upstream version.
+  * Policy 3.9.3 (no changes).
+
+ -- Peter Samuelson <peter@p12n.org>  Fri, 08 Jun 2012 00:18:56 -0500
+
+serf (1.0.1-1) experimental; urgency=low
+
+  * New upstream release.
+    - patches/bind_address_family: Delete, applied upstream.
+  * Delete obsolete lintian override (workaround for an old lintian).
+
+ -- Peter Samuelson <peter@p12n.org>  Sat, 25 Feb 2012 14:43:53 -0600
+
+serf (1.0.0-2) experimental; urgency=low
+
+  * patches/bind_address_family: New patch from Anders Kaseorg to replace
+    patches/ip6-localhost.  We'll see if it addresses #632573.
+  * Policy 3.9.2 (no changes).
+
+ -- Peter Samuelson <peter@p12n.org>  Wed, 17 Aug 2011 17:12:21 -0500
+
+serf (1.0.0-1) experimental; urgency=low
+
+  * New upstream release.
+    - patches/out-of-tree, patches/kqueue: Remove, accepted upstream.
+    - Now ships pkgconfig file serf-1.pc.
+
+ -- Peter Samuelson <peter@p12n.org>  Fri, 15 Jul 2011 17:49:29 -0500
+
+serf (1.0.0~0+svn1514-1) experimental; urgency=low
+
+  * New upstream snapshot.
+    - patches/abi-0.x: Remove as obsolete.
+    - patches/kqueue: Forward-port.
+    - Bump ABI: libserf0.7{,-dbg} -> libserf1{,-dbg}
+    - patches/ip6-localhost: New patch: temporary (I hope) workaround for
+      IPv4 / IPv6 confusion in testsuite.
+  * Implement Multi-Arch: same.
+  * libserf-dev Conflicts: libserf-0-0-dev, not Breaks.  Thanks, lintian.
+
+ -- Peter Samuelson <peter@p12n.org>  Mon, 27 Jun 2011 18:09:28 -0500
+
+serf (0.7.2-1) experimental; urgency=low
+
+  * New upstream release.
+    - patches/no-export-vars: delete, now upstream.
+  * New ABI:
+    - patches/abi-0.x: New patch to change upstream SONAME.
+    - Rename libserf-0-0 to libserf0.7.
+    - Rename libserf-0-0-dev to libserf-dev while we're at it.
+  * Policy 3.9.1: one instance of s/Conflicts/Breaks/.
+  * "Upgrade" to source format 1.0.
+  * Add some Depends: ${misc:Depends}; thanks, Lintian.
+
+ -- Peter Samuelson <peter@p12n.org>  Fri, 03 Jun 2011 03:18:07 -0500
+
 serf (0.3.1-1) unstable; urgency=low
 
   * New upstream release.

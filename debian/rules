@@ -13,11 +13,15 @@ include /usr/share/quilt/quilt.make
 # from having to guess our platform (since we know it already)
 DEB_HOST_GNU_TYPE   ?= $(shell dpkg-architecture -qDEB_HOST_GNU_TYPE)
 DEB_BUILD_GNU_TYPE  ?= $(shell dpkg-architecture -qDEB_BUILD_GNU_TYPE)
+DEB_HOST_MULTIARCH  ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
 ifneq ($(DEB_HOST_GNU_TYPE),$(DEB_BUILD_GNU_TYPE))
 CROSS= --build $(DEB_BUILD_GNU_TYPE) --host $(DEB_HOST_GNU_TYPE)
 else
 CROSS= --build $(DEB_BUILD_GNU_TYPE)
 endif
+
+libdir := /usr/lib/$(DEB_HOST_MULTIARCH)
+includedir := /usr/include
 
 configure: patch
 	autoconf
@@ -27,11 +31,14 @@ BUILD/config.status: configure
 	cp -f /usr/share/misc/config.sub config.sub
 	cp -f /usr/share/misc/config.guess config.guess
 	mkdir -p BUILD
-	cd BUILD; ../configure $(CROSS) --prefix=/usr --mandir=\$${prefix}/share/man \
+	cd BUILD; ../configure $(CROSS) --prefix=/usr \
+	    --libdir=$(libdir) --mandir=/usr/share/man \
 	    CFLAGS="$(CFLAGS)" LDFLAGS="-Wl,-z,defs"
 
 
-build: debian/stamp-build
+build: build-arch build-indep
+build-indep:
+build-arch: debian/stamp-build
 debian/stamp-build:  BUILD/config.status
 	dh_testdir
 
@@ -45,7 +52,6 @@ endif
 clean: unpatch
 	dh_testdir
 
-	#[ ! -f Makefile ] || $(MAKE) distclean
 	rm -fr BUILD
 	rm -f configure config.sub config.guess debian/stamp-*
 
@@ -55,7 +61,6 @@ install: build
 	dh_testdir
 	dh_testroot
 	dh_clean -k 
-	dh_installdirs
 
 	$(MAKE) -C BUILD DESTDIR=$(CURDIR)/debian/tmp install
 
@@ -67,23 +72,30 @@ binary-arch: build install
 	dh_installchangelogs -s CHANGES
 	dh_installdocs -s NOTICE
 	dh_installexamples -s
-	dh_install -s
 	dh_installman -s
-	for p in $$(dh_listpackages -s -Nlibserf-0-0); do \
-		doc0=debian/$$p/usr/share/doc/libserf-0-0; \
+	install -d debian/libserf1/$(libdir) debian/libserf-dev/$(libdir)
+	install -d debian/libserf-dev/$(includedir)
+	mv debian/tmp$(libdir)/*.so.* debian/libserf1$(libdir)/
+	mv debian/tmp$(libdir)/*.so debian/libserf-dev$(libdir)/
+	mv debian/tmp$(libdir)/*.a debian/libserf-dev$(libdir)/
+	mv debian/tmp$(libdir)/pkgconfig debian/libserf-dev$(libdir)/
+	mv debian/tmp$(includedir)/* debian/libserf-dev$(includedir)/
+	for p in $$(dh_listpackages -s -Nlibserf1); do \
+		doc0=debian/$$p/usr/share/doc/libserf1; \
 		doc=debian/$$p/usr/share/doc/$$p; \
 		rm -f $$doc/changelog* $$doc/copyright; \
 		mv $$doc $$doc0; \
 		rmdir --ignore-fail-on-non-empty $$doc0; \
-		ln -s libserf-0-0 $$doc; \
+		ln -s libserf1 $$doc; \
 	done;
 	dh_link -s
-	dh_strip -s --dbg-package=libserf-0-0-dbg
+	dh_strip -s --dbg-package=libserf1-dbg
 	dh_compress -s
 	dh_fixperms -s
 	dh_makeshlibs -s
 	dh_installdeb -s
 	dh_shlibdeps -s
+	dh_lintian -s || true
 	dh_gencontrol -s
 	dh_md5sums -s
 	dh_builddeb -s
