@@ -24,7 +24,7 @@ typedef struct {
 } barrier_context_t;
 
 
-SERF_DECLARE(serf_bucket_t *) serf_bucket_barrier_create(
+serf_bucket_t *serf_bucket_barrier_create(
     serf_bucket_t *stream,
     serf_bucket_alloc_t *allocator)
 {
@@ -43,6 +43,17 @@ static apr_status_t serf_barrier_read(serf_bucket_t *bucket,
     barrier_context_t *ctx = bucket->data;
 
     return serf_bucket_read(ctx->stream, requested, data, len);
+}
+
+static apr_status_t serf_barrier_read_iovec(serf_bucket_t *bucket,
+                                            apr_size_t requested,
+                                            int vecs_size, struct iovec *vecs,
+                                            int *vecs_used)
+{
+    barrier_context_t *ctx = bucket->data;
+
+    return serf_bucket_read_iovec(ctx->stream, requested, vecs_size, vecs,
+                                  vecs_used);
 }
 
 static apr_status_t serf_barrier_readline(serf_bucket_t *bucket,
@@ -74,16 +85,13 @@ static void serf_barrier_destroy(serf_bucket_t *bucket)
     serf_default_destroy_and_data(bucket);
 }
 
-SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_barrier = {
+const serf_bucket_type_t serf_bucket_type_barrier = {
     "BARRIER",
     serf_barrier_read,
     serf_barrier_readline,
-    serf_default_read_iovec,
+    serf_barrier_read_iovec,
     serf_default_read_for_sendfile,
     serf_default_read_bucket,
     serf_barrier_peek,
     serf_barrier_destroy,
-    serf_default_snapshot,
-    serf_default_restore_snapshot,
-    serf_default_is_snapshot_set,
 };

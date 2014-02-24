@@ -25,11 +25,15 @@ typedef struct {
     const char *uri;
     serf_bucket_t *headers;
     serf_bucket_t *body;
+    apr_int64_t len;
 } request_context_t;
 
-SERF_DECLARE(serf_bucket_t *) serf_bucket_request_create(
+#define LENGTH_UNKNOWN ((apr_int64_t)-1)
+
+
+serf_bucket_t *serf_bucket_request_create(
     const char *method,
-    const char *uri,
+    const char *URI,
     serf_bucket_t *body,
     serf_bucket_alloc_t *allocator)
 {
@@ -37,20 +41,30 @@ SERF_DECLARE(serf_bucket_t *) serf_bucket_request_create(
 
     ctx = serf_bucket_mem_alloc(allocator, sizeof(*ctx));
     ctx->method = method;
-    ctx->uri = uri;
+    ctx->uri = URI;
     ctx->headers = serf_bucket_headers_create(allocator);
     ctx->body = body;
+    ctx->len = LENGTH_UNKNOWN;
 
     return serf_bucket_create(&serf_bucket_type_request, allocator, ctx);
 }
 
-SERF_DECLARE(serf_bucket_t *) serf_bucket_request_get_headers(
+void serf_bucket_request_set_CL(
+    serf_bucket_t *bucket,
+    apr_int64_t len)
+{
+    request_context_t *ctx = (request_context_t *)bucket->data;
+
+    ctx->len = len;
+}
+
+serf_bucket_t *serf_bucket_request_get_headers(
     serf_bucket_t *bucket)
 {
     return ((request_context_t *)bucket->data)->headers;
 }
 
-SERF_DECLARE(void) serf_bucket_request_set_root(
+void serf_bucket_request_set_root(
     serf_bucket_t *bucket,
     const char *root_url)
 {
@@ -111,9 +125,19 @@ static void serialize_data(serf_bucket_t *bucket)
     /* Insert the two buckets. */
     serf_bucket_aggregate_append(bucket, new_bucket);
     serf_bucket_aggregate_append(bucket, ctx->headers);
-    if (ctx->body != NULL) {
+
+    /* If we know the length, then use C-L and the raw body. Otherwise,
+       use chunked encoding for the request.  */
+    if (ctx->len != LENGTH_UNKNOWN) {
+        char buf[30];
+        sprintf(buf, "%" APR_INT64_T_FMT, ctx->len);
+        serf_bucket_headers_set(ctx->headers, "Content-Length", buf);
+        if (ctx->body != NULL)
+            serf_bucket_aggregate_append(bucket, ctx->body);
+    }
+    else if (ctx->body != NULL) {
         /* Morph the body bucket to a chunked encoding bucket for now. */
-        serf_bucket_headers_set(ctx->headers, "Transfer-Encoding", "chunked");
+        serf_bucket_headers_setn(ctx->headers, "Transfer-Encoding", "chunked");
         ctx->body = serf_bucket_chunk_create(ctx->body, bucket->allocator);
         serf_bucket_aggregate_append(bucket, ctx->body);
     }
@@ -171,10 +195,11 @@ static apr_status_t serf_request_peek(serf_bucket_t *bucket,
     return serf_bucket_peek(bucket, data, len);
 }
 
-SERF_DECLARE(void) serf_bucket_request_become(serf_bucket_t *bucket,
-                                              const char *method,
-                                              const char *uri,
-                                              serf_bucket_t *body)
+void serf_bucket_request_become(
+    serf_bucket_t *bucket,
+    const char *method,
+    const char *uri,
+    serf_bucket_t *body)
 {
     request_context_t *ctx;
 
@@ -190,7 +215,7 @@ SERF_DECLARE(void) serf_bucket_request_become(serf_bucket_t *bucket,
     /* The allocator remains the same. */
 }
 
-SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_request = {
+const serf_bucket_type_t serf_bucket_type_request = {
     "REQUEST",
     serf_request_read,
     serf_request_readline,
@@ -199,8 +224,5 @@ SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_request = {
     serf_default_read_bucket,
     serf_request_peek,
     serf_default_destroy_and_data,
-    serf_default_snapshot,
-    serf_default_restore_snapshot,
-    serf_default_is_snapshot_set,
 };
 

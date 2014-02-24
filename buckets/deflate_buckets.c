@@ -60,10 +60,10 @@ typedef struct {
     int bufferSize;
 
     /* How much of the chunk, or the terminator, do we have left to read? */
-    apr_int64_t stream_left;
+    apr_size_t stream_left;
 
     /* How much are we supposed to read? */
-    apr_int64_t stream_size;
+    apr_size_t stream_size;
 
     int stream_status; /* What was the last status we read? */
 
@@ -78,7 +78,7 @@ static unsigned long getLong(unsigned char *string)
           | (((unsigned long)string[3]) << 24);
 }
 
-SERF_DECLARE(serf_bucket_t *) serf_bucket_deflate_create(
+serf_bucket_t *serf_bucket_deflate_create(
     serf_bucket_t *stream,
     serf_bucket_alloc_t *allocator,
     int format)
@@ -120,6 +120,10 @@ SERF_DECLARE(serf_bucket_t *) serf_bucket_deflate_create(
 static void serf_deflate_destroy_and_data(serf_bucket_t *bucket)
 {
     deflate_context_t *ctx = bucket->data;
+
+    if (ctx->state > STATE_INIT &&
+        ctx->state <= STATE_FINISH)
+        inflateEnd(&ctx->zstream);
 
     /* We may have appended inflate_stream into the stream bucket.
      * If so, avoid free'ing it twice.
@@ -174,10 +178,10 @@ static apr_status_t serf_deflate_read(serf_bucket_t *bucket,
         case STATE_HEADER:
             if (ctx->hdr_buffer[0] != deflate_magic[0] ||
                 ctx->hdr_buffer[1] != deflate_magic[1]) {
-                return APR_EGENERAL;
+                return SERF_ERROR_DECOMPRESSION_FAILED;
             }
             if (ctx->hdr_buffer[3] != 0) {
-                return APR_EGENERAL;
+                return SERF_ERROR_DECOMPRESSION_FAILED;
             }
             ctx->state++;
             break;
@@ -185,18 +189,18 @@ static apr_status_t serf_deflate_read(serf_bucket_t *bucket,
             /* Do the checksum computation. */
             compCRC = getLong((unsigned char*)ctx->hdr_buffer);
             if (ctx->crc != compCRC) {
-                return APR_EGENERAL;
+                return SERF_ERROR_DECOMPRESSION_FAILED;
             }
             compLen = getLong((unsigned char*)ctx->hdr_buffer + 4);
             if (ctx->zstream.total_out != compLen) {
-                return APR_EGENERAL;
+                return SERF_ERROR_DECOMPRESSION_FAILED;
             }
             ctx->state++;
             break;
         case STATE_INIT:
             zRC = inflateInit2(&ctx->zstream, ctx->windowSize);
             if (zRC != Z_OK) {
-                return APR_EGENERAL;
+                return SERF_ERROR_DECOMPRESSION_FAILED;
             }
             ctx->zstream.next_out = ctx->buffer;
             ctx->zstream.avail_out = ctx->bufferSize;
@@ -327,7 +331,7 @@ static apr_status_t serf_deflate_read(serf_bucket_t *bucket,
                     break;
                 }
                 if (zRC != Z_OK) {
-                    return APR_EGENERAL;
+                    return SERF_ERROR_DECOMPRESSION_FAILED;
                 }
             }
             /* Okay, we've inflated.  Try to read. */
@@ -340,7 +344,15 @@ static apr_status_t serf_deflate_read(serf_bucket_t *bucket,
                  * we'll iterate one more time.
                  */
                 if (APR_STATUS_IS_EOF(status)) {
-                    return APR_SUCCESS;
+                    /* No more data to read from the stream, and everything
+                       inflated. If all data was received correctly, state
+                       should have been advanced to STATE_READING_VERIFY or
+                       STATE_FINISH. If not, then the data was incomplete
+                       and we have an error. */
+                    if (ctx->state != STATE_INFLATE)
+                        return APR_SUCCESS;
+                    else
+                        return SERF_ERROR_DECOMPRESSION_FAILED;
                 }
             }
             return status;
@@ -360,7 +372,7 @@ static apr_status_t serf_deflate_read(serf_bucket_t *bucket,
 #define serf_deflate_readline NULL
 #define serf_deflate_peek NULL
 
-SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_deflate = {
+const serf_bucket_type_t serf_bucket_type_deflate = {
     "DEFLATE",
     serf_deflate_read,
     serf_deflate_readline,
@@ -369,8 +381,4 @@ SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_deflate = {
     serf_default_read_bucket,
     serf_deflate_peek,
     serf_deflate_destroy_and_data,
-    serf_default_snapshot,
-    serf_default_restore_snapshot,
-    serf_default_is_snapshot_set,
 };
-

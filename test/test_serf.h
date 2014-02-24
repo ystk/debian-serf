@@ -23,6 +23,7 @@
 #include <apr_uri.h>
 
 #include "serf.h"
+#include "server/test_server.h"
 
 /** These macros are provided by APR itself from version 1.3.
  * Definitions are provided here for when using older versions of APR.
@@ -38,8 +39,6 @@
 #define APR_ARRAY_PUSH(ary,type) (*((type *)apr_array_push(ary)))
 #endif
 
-extern apr_pool_t *test_pool;
-
 /* CuTest declarations */
 CuSuite *getsuite(void);
 
@@ -51,8 +50,9 @@ CuSuite *test_ssl(void);
 
 #define CRLF "\r\n"
 
-#define CHUNCKED_REQUEST(len, body)\
+#define CHUNKED_REQUEST(len, body)\
         "GET / HTTP/1.1" CRLF\
+        "Host: localhost:12345" CRLF\
         "Transfer-Encoding: chunked" CRLF\
         CRLF\
         #len CRLF\
@@ -76,17 +76,6 @@ CuSuite *test_ssl(void);
         "0" CRLF\
         CRLF
 
-typedef struct
-{
-    enum {
-        SERVER_RECV,
-        SERVER_SEND,
-        SERVER_KILL_CONNECTION
-    } kind;
-
-    const char *text;
-} test_server_action_t;
-
 typedef struct {
     /* Pool for resource allocation. */
     apr_pool_t *pool;
@@ -94,57 +83,44 @@ typedef struct {
     serf_context_t *context;
     serf_connection_t *connection;
     serf_bucket_alloc_t *bkt_alloc;
-    apr_int32_t options;
 
-    /* Array of actions which server will replay when client connected. */
-    test_server_action_t *action_list;
-    /* Size of action_list array. */
-    apr_size_t action_count;
-    /* Index of current action. */
-    apr_size_t cur_action;
-
-    /* Position in action buffer. */
-    apr_size_t action_buf_pos;
-
-    /* Address for server binding. */
+    serv_ctx_t *serv_ctx;
     apr_sockaddr_t *serv_addr;
-    apr_socket_t *serv_sock;
 
-    /* Accepted client socket. NULL if there is no client socket. */
-    apr_socket_t *client_sock;
+    serv_ctx_t *proxy_ctx;
+    apr_sockaddr_t *proxy_addr;
 
     /* An extra baton which can be freely used by tests. */
     void *user_baton;
 
 } test_baton_t;
 
-#define TEST_SERVER_DUMP 1
+apr_status_t test_server_setup(test_baton_t **tb_p,
+                               test_server_message_t *message_list,
+                               apr_size_t message_count,
+                               test_server_action_t *action_list,
+                               apr_size_t action_count,
+                               apr_int32_t options,
+                               serf_connection_setup_t conn_setup,
+                               apr_pool_t *pool);
 
-/* Default port for our test server. */
-#define SERV_PORT 12345
-#define SERV_PORT_STR "12345"
+apr_status_t test_server_proxy_setup(
+                 test_baton_t **tb_p,
+                 test_server_message_t *serv_message_list,
+                 apr_size_t serv_message_count,
+                 test_server_action_t *serv_action_list,
+                 apr_size_t serv_action_count,
+                 test_server_message_t *proxy_message_list,
+                 apr_size_t proxy_message_count,
+                 test_server_action_t *proxy_action_list,
+                 apr_size_t proxy_action_count,
+                 apr_int32_t options,
+                 serf_connection_setup_t conn_setup,
+                 apr_pool_t *pool);
 
-apr_status_t test_server_create(test_baton_t **tb,
-                                test_server_action_t *action_list,
-                                apr_size_t action_count,
-                                apr_int32_t options,
-                                const char *host_url,
-                                apr_sockaddr_t *address,
-                                serf_connection_setup_t conn_setup,
-                                apr_pool_t *pool);
+apr_status_t test_server_teardown(test_baton_t *tb, apr_pool_t *pool);
 
-apr_status_t test_server_run(test_baton_t *tb,
-                             apr_short_interval_time_t duration,
-                             apr_pool_t *pool);
-
-apr_status_t test_server_destroy(test_baton_t *tb, apr_pool_t *pool);
-
-#ifndef APR_VERSION_AT_LEAST /* Introduced in APR 1.3.0 */
-#define APR_VERSION_AT_LEAST(major,minor,patch)                  \
-(((major) < APR_MAJOR_VERSION)                                       \
- || ((major) == APR_MAJOR_VERSION && (minor) < APR_MINOR_VERSION)    \
- || ((major) == APR_MAJOR_VERSION && (minor) == APR_MINOR_VERSION && \
-     (patch) <= APR_PATCH_VERSION))
-#endif /* APR_VERSION_AT_LEAST */
+apr_pool_t *test_setup(void);
+void test_teardown(apr_pool_t *test_pool);
 
 #endif /* TEST_SERF_H */

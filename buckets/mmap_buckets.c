@@ -28,7 +28,7 @@ typedef struct {
 } mmap_context_t;
 
 
-SERF_DECLARE(serf_bucket_t *) serf_bucket_mmap_create(
+serf_bucket_t *serf_bucket_mmap_create(
     apr_mmap_t *file_mmap,
     serf_bucket_alloc_t *allocator)
 {
@@ -106,7 +106,7 @@ static apr_status_t serf_mmap_peek(serf_bucket_t *bucket,
     return APR_ENOTIMPL;
 }
 
-SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_mmap = {
+const serf_bucket_type_t serf_bucket_type_mmap = {
     "MMAP",
     serf_mmap_read,
     serf_mmap_readline,
@@ -115,7 +115,4 @@ SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_mmap = {
     serf_default_read_bucket,
     serf_mmap_peek,
     serf_default_destroy_and_data,
-    serf_default_snapshot,
-    serf_default_restore_snapshot,
-    serf_default_is_snapshot_set,
 };

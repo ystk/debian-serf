@@ -28,8 +28,11 @@ typedef struct {
     bucket_list_t *last; /* last bucket of the list */
     bucket_list_t *done; /* we finished reading this; now pending a destroy */
 
-    /* Marks if a snapshot is set. */
-    int snapshot; 
+    serf_bucket_aggregate_eof_t hold_open;
+    void *hold_open_baton;
+
+    /* Does this bucket own its children? !0 if yes, 0 if not. */
+    int bucket_owner;
 } aggregate_context_t;
 
 
@@ -38,36 +41,70 @@ static void cleanup_aggregate(aggregate_context_t *ctx,
 {
     bucket_list_t *next_list;
 
-    /* If a snapshot is set, don't clear the done list, we might need
-       it later. */
-    if (ctx->snapshot)
-        return;
-
     /* If we finished reading a bucket during the previous read, then
      * we can now toss that bucket.
      */
     while (ctx->done != NULL) {
         next_list = ctx->done->next;
 
-        serf_bucket_destroy(ctx->done->bucket);
+        if (ctx->bucket_owner) {
+            serf_bucket_destroy(ctx->done->bucket);
+        }
         serf_bucket_mem_free(allocator, ctx->done);
 
         ctx->done = next_list;
     }
 }
 
-SERF_DECLARE(serf_bucket_t *) serf_bucket_aggregate_create(
-    serf_bucket_alloc_t *allocator)
+void serf_bucket_aggregate_cleanup(
+    serf_bucket_t *bucket, serf_bucket_alloc_t *allocator)
+{
+    aggregate_context_t *ctx = bucket->data;
+
+    cleanup_aggregate(ctx, allocator);
+}
+
+static aggregate_context_t *create_aggregate(serf_bucket_alloc_t *allocator)
 {
     aggregate_context_t *ctx;
 
     ctx = serf_bucket_mem_alloc(allocator, sizeof(*ctx));
+
     ctx->list = NULL;
+    ctx->last = NULL;
     ctx->done = NULL;
-    ctx->snapshot = 0;
+    ctx->hold_open = NULL;
+    ctx->hold_open_baton = NULL;
+    ctx->bucket_owner = 1;
+
+    return ctx;
+}
+
+serf_bucket_t *serf_bucket_aggregate_create(
+    serf_bucket_alloc_t *allocator)
+{
+    aggregate_context_t *ctx;
+
+    ctx = create_aggregate(allocator);
 
     return serf_bucket_create(&serf_bucket_type_aggregate, allocator, ctx);
 }
+
+serf_bucket_t *serf__bucket_stream_create(
+    serf_bucket_alloc_t *allocator,
+    serf_bucket_aggregate_eof_t fn,
+    void *baton)
+{
+    serf_bucket_t *bucket = serf_bucket_aggregate_create(allocator);
+    aggregate_context_t *ctx = bucket->data;
+
+    serf_bucket_aggregate_hold_open(bucket, fn, baton);
+
+    ctx->bucket_owner = 0;
+
+    return bucket;
+}
+
 
 static void serf_aggregate_destroy_and_data(serf_bucket_t *bucket)
 {
@@ -75,7 +112,9 @@ static void serf_aggregate_destroy_and_data(serf_bucket_t *bucket)
     bucket_list_t *next_ctx;
 
     while (ctx->list) {
-        serf_bucket_destroy(ctx->list->bucket);
+        if (ctx->bucket_owner) {
+            serf_bucket_destroy(ctx->list->bucket);
+        }
         next_ctx = ctx->list->next;
         serf_bucket_mem_free(bucket->allocator, ctx->list);
         ctx->list = next_ctx;
@@ -85,15 +124,11 @@ static void serf_aggregate_destroy_and_data(serf_bucket_t *bucket)
     serf_default_destroy_and_data(bucket);
 }
 
-SERF_DECLARE(void) serf_bucket_aggregate_become(serf_bucket_t *bucket)
+void serf_bucket_aggregate_become(serf_bucket_t *bucket)
 {
     aggregate_context_t *ctx;
 
-    ctx = serf_bucket_mem_alloc(bucket->allocator, sizeof(*ctx));
-    ctx->list = NULL;
-    ctx->last = NULL;
-    ctx->done = NULL;
-    ctx->snapshot = 0;
+    ctx = create_aggregate(bucket->allocator);
 
     bucket->type = &serf_bucket_type_aggregate;
     bucket->data = ctx;
@@ -102,7 +137,7 @@ SERF_DECLARE(void) serf_bucket_aggregate_become(serf_bucket_t *bucket)
 }
 
 
-SERF_DECLARE(void) serf_bucket_aggregate_prepend(
+void serf_bucket_aggregate_prepend(
     serf_bucket_t *aggregate_bucket,
     serf_bucket_t *prepend_bucket)
 {
@@ -117,7 +152,7 @@ SERF_DECLARE(void) serf_bucket_aggregate_prepend(
     ctx->list = new_list;
 }
 
-SERF_DECLARE(void) serf_bucket_aggregate_append(
+void serf_bucket_aggregate_append(
     serf_bucket_t *aggregate_bucket,
     serf_bucket_t *append_bucket)
 {
@@ -135,15 +170,24 @@ SERF_DECLARE(void) serf_bucket_aggregate_append(
     */
     if (ctx->list == NULL) {
         ctx->list = new_list;
-	ctx->last = new_list;
+        ctx->last = new_list;
     }
     else {
         ctx->last->next = new_list;
-	ctx->last = ctx->last->next;
+        ctx->last = ctx->last->next;
     }
 }
 
-SERF_DECLARE(void) serf_bucket_aggregate_prepend_iovec(
+void serf_bucket_aggregate_hold_open(serf_bucket_t *aggregate_bucket, 
+                                     serf_bucket_aggregate_eof_t fn,
+                                     void *baton)
+{
+    aggregate_context_t *ctx = aggregate_bucket->data;
+    ctx->hold_open = fn;
+    ctx->hold_open_baton = baton;
+}
+
+void serf_bucket_aggregate_prepend_iovec(
     serf_bucket_t *aggregate_bucket,
     struct iovec *vecs,
     int vecs_count)
@@ -151,7 +195,7 @@ SERF_DECLARE(void) serf_bucket_aggregate_prepend_iovec(
     int i;
 
     /* Add in reverse order. */
-    for (i = vecs_count - 1; i > 0; i--) {
+    for (i = vecs_count - 1; i >= 0; i--) {
         serf_bucket_t *new_bucket;
 
         new_bucket = serf_bucket_simple_create(vecs[i].iov_base,
@@ -164,24 +208,17 @@ SERF_DECLARE(void) serf_bucket_aggregate_prepend_iovec(
     }
 }
 
-SERF_DECLARE(void) serf_bucket_aggregate_append_iovec(
+void serf_bucket_aggregate_append_iovec(
     serf_bucket_t *aggregate_bucket,
     struct iovec *vecs,
     int vecs_count)
 {
-    int i;
+    serf_bucket_t *new_bucket;
 
-    for (i = 0; i < vecs_count; i++) {
-        serf_bucket_t *new_bucket;
+    new_bucket = serf_bucket_iovec_create(vecs, vecs_count,
+                                          aggregate_bucket->allocator);
 
-        new_bucket = serf_bucket_simple_create(vecs[i].iov_base,
-                                               vecs[i].iov_len,
-                                               NULL, NULL,
-                                               aggregate_bucket->allocator);
-
-        serf_bucket_aggregate_append(aggregate_bucket, new_bucket);
-
-    }
+    serf_bucket_aggregate_append(aggregate_bucket, new_bucket);
 }
 
 static apr_status_t read_aggregate(serf_bucket_t *bucket,
@@ -191,16 +228,22 @@ static apr_status_t read_aggregate(serf_bucket_t *bucket,
 {
     aggregate_context_t *ctx = bucket->data;
     int cur_vecs_used;
+    apr_status_t status;
 
     *vecs_used = 0;
 
     if (!ctx->list) {
-        return APR_EOF;
+        if (ctx->hold_open) {
+            return ctx->hold_open(ctx->hold_open_baton, bucket);
+        }
+        else {
+            return APR_EOF;
+        }
     }
 
-    while (1) {
+    status = APR_SUCCESS;
+    while (requested) {
         serf_bucket_t *head = ctx->list->bucket;
-        apr_status_t status;
 
         status = serf_bucket_read_iovec(head, requested, vecs_size, vecs,
                                         &cur_vecs_used);
@@ -217,7 +260,7 @@ static apr_status_t read_aggregate(serf_bucket_t *bucket,
             /* If we got SUCCESS (w/bytes) or EAGAIN, we want to return now
              * as it isn't safe to read more without returning to our caller.
              */
-            if (!status || APR_STATUS_IS_EAGAIN(status)) {
+            if (!status || APR_STATUS_IS_EAGAIN(status) || status == SERF_ERROR_WAIT_CONN) {
                 return status;
             }
 
@@ -235,7 +278,12 @@ static apr_status_t read_aggregate(serf_bucket_t *bucket,
 
             /* If we have no more in our list, return EOF. */
             if (!ctx->list) {
-                return status;
+                if (ctx->hold_open) {
+                    return ctx->hold_open(ctx->hold_open_baton, bucket);
+                }
+                else {
+                    return APR_EOF;
+                }
             }
 
             /* At this point, it safe to read the next bucket - if we can. */
@@ -260,7 +308,8 @@ static apr_status_t read_aggregate(serf_bucket_t *bucket,
             }
         }
     }
-    /* NOTREACHED */
+
+    return status;
 }
 
 static apr_status_t serf_aggregate_read(serf_bucket_t *bucket,
@@ -338,69 +387,8 @@ static serf_bucket_t * serf_aggregate_read_bucket(
     return serf_bucket_read_bucket(ctx->list->bucket, type);
 }
 
-static apr_status_t serf_aggregate_snapshot(serf_bucket_t *bucket)
-{
-    bucket_list_t *next_ctx;
-    aggregate_context_t *ctx = bucket->data;
-    apr_status_t status;
 
-    /* Clear all read buckets. */
-    cleanup_aggregate(ctx, bucket->allocator);
-
-    /* Make a snapshot of all the children too. */
-    next_ctx = ctx->list;
-    while (next_ctx) {
-        status = serf_bucket_snapshot(next_ctx->bucket);
-        if (status)
-  	    return status;
-        next_ctx = next_ctx->next;
-    }    
-
-    /* From now on, stop clearing read buckets. */
-    ctx->snapshot = 1;
-
-    return APR_SUCCESS;
-}
-
-static apr_status_t serf_aggregate_restore_snapshot(serf_bucket_t *bucket)
-{
-    bucket_list_t *next_ctx;
-    aggregate_context_t *ctx = bucket->data;
-    apr_status_t status;
-
-    /* Move all the DONE buckets back in the LIST. */
-    if (! ctx->last && ! ctx->list)
-        ctx->last = ctx->done;
-
-    while (ctx->done) {
-        next_ctx = ctx->done->next;
-        ctx->done->next = ctx->list;
-        ctx->list = ctx->done;
-        ctx->done = next_ctx;
-    }
-
-    /* Now restore all the child buckets. If resetting one of those buckets
-       fails, consider this restore operation as failed too. */
-    next_ctx = ctx->list;
-    while (next_ctx) {
-        status = serf_bucket_restore_snapshot(next_ctx->bucket);
-        if (status)
-            return status;
-        next_ctx = next_ctx->next;
-    }    
-    ctx->snapshot = 0;
-
-    return APR_SUCCESS;
-}
-
-static int serf_aggregate_is_snapshot_set(serf_bucket_t *bucket)
-{
-    aggregate_context_t *ctx = bucket->data;
-
-    return ctx->snapshot;
-}
-
-SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_aggregate = {
+const serf_bucket_type_t serf_bucket_type_aggregate = {
     "AGGREGATE",
     serf_aggregate_read,
     serf_aggregate_readline,
@@ -409,7 +397,4 @@ SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_aggregate = {
     serf_aggregate_read_bucket,
     serf_aggregate_peek,
     serf_aggregate_destroy_and_data,
-    serf_aggregate_snapshot,
-    serf_aggregate_restore_snapshot,
-    serf_aggregate_is_snapshot_set,
 };

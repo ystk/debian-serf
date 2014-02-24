@@ -10,7 +10,7 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * chunkations under the License.
+ * limitations under the License.
  */
 
 #include <apr_pools.h>
@@ -36,7 +36,7 @@ typedef struct {
 } chunk_context_t;
 
 
-SERF_DECLARE(serf_bucket_t *) serf_bucket_chunk_create(
+serf_bucket_t *serf_bucket_chunk_create(
     serf_bucket_t *stream, serf_bucket_alloc_t *allocator)
 {
     chunk_context_t *ctx;
@@ -57,7 +57,7 @@ static apr_status_t create_chunk(serf_bucket_t *bucket)
     serf_bucket_t *simple_bkt;
     apr_size_t chunk_len;
     apr_size_t stream_len;
-    struct iovec vecs[34]; /* 32 + chunk trailer + EOF trailer = 34 */
+    struct iovec vecs[66]; /* 64 + chunk trailer + EOF trailer = 66 */
     int vecs_read;
     int i;
 
@@ -67,7 +67,7 @@ static apr_status_t create_chunk(serf_bucket_t *bucket)
 
     ctx->last_status =
         serf_bucket_read_iovec(ctx->stream, SERF_READ_ALL_AVAIL,
-                               32, vecs, &vecs_read);
+                               64, vecs, &vecs_read);
 
     if (SERF_BUCKET_READ_ERROR(ctx->last_status)) {
         /* Uh-oh. */
@@ -223,7 +223,7 @@ static void serf_chunk_destroy(serf_bucket_t *bucket)
     serf_default_destroy_and_data(bucket);
 }
 
-SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_chunk = {
+const serf_bucket_type_t serf_bucket_type_chunk = {
     "CHUNK",
     serf_chunk_read,
     serf_chunk_readline,
@@ -232,7 +232,4 @@ SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_chunk = {
     serf_default_read_bucket,
     serf_chunk_peek,
     serf_chunk_destroy,
-    serf_default_snapshot,
-    serf_default_restore_snapshot,
-    serf_default_is_snapshot_set,
 };

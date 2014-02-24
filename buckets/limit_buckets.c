@@ -18,15 +18,22 @@
 #include "serf.h"
 #include "serf_bucket_util.h"
 
+/* Older versions of APR do not have this macro.  */
+#ifdef APR_SIZE_MAX
+#define REQUESTED_MAX APR_SIZE_MAX
+#else
+#define REQUESTED_MAX (~((apr_size_t)0))
+#endif
+
 
 typedef struct {
     serf_bucket_t *stream;
-    apr_size_t remaining;
+    apr_uint64_t remaining;
 } limit_context_t;
 
 
-SERF_DECLARE(serf_bucket_t *) serf_bucket_limit_create(
-    serf_bucket_t *stream, apr_size_t len, serf_bucket_alloc_t *allocator)
+serf_bucket_t *serf_bucket_limit_create(
+    serf_bucket_t *stream, apr_uint64_t len, serf_bucket_alloc_t *allocator)
 {
     limit_context_t *ctx;
 
@@ -49,8 +56,13 @@ static apr_status_t serf_limit_read(serf_bucket_t *bucket,
         return APR_EOF;
     }
 
-    if (requested == SERF_READ_ALL_AVAIL || requested > ctx->remaining)
-        requested = ctx->remaining;
+    if (requested == SERF_READ_ALL_AVAIL || requested > ctx->remaining) {
+        if (ctx->remaining <= REQUESTED_MAX) {
+            requested = (apr_size_t) ctx->remaining;
+        } else {
+            requested = REQUESTED_MAX;
+        }
+    }
 
     status = serf_bucket_read(ctx->stream, requested, data, len);
 
@@ -110,7 +122,7 @@ static void serf_limit_destroy(serf_bucket_t *bucket)
     serf_default_destroy_and_data(bucket);
 }
 
-SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_limit = {
+const serf_bucket_type_t serf_bucket_type_limit = {
     "LIMIT",
     serf_limit_read,
     serf_limit_readline,
@@ -119,7 +131,4 @@ SERF_DECLARE_DATA const serf_bucket_type_t serf_bucket_type_limit = {
     serf_default_read_bucket,
     serf_limit_peek,
     serf_limit_destroy,
-    serf_default_snapshot,
-    serf_default_restore_snapshot,
-    serf_default_is_snapshot_set,
 };

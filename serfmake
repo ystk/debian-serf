@@ -5,16 +5,28 @@ import re
 import shutil
 import sys
 import stat
+import copy
+
+### use get_version() ?
+MAJOR = 1
+
+# Basic defines for our outputs.
+LIBNAME = 'libserf-%d' % (MAJOR,)
+INCLUDES = 'serf-%d' % (MAJOR,)
+PCFILE = 'serf-%d' % (MAJOR,)
+
 
 FILES_HDR = [
   ('.', 'serf'),
   ('.', 'serf_bucket_types'),
   ('.', 'serf_bucket_util'),
-  ('.', 'serf_declare'),
   ]
 
 LIB_FILES = [
   ('.', 'context'),
+  ('.', 'incoming'),
+  ('.', 'outgoing'),
+  ('.', 'ssltunnel'),
 
   ('buckets', 'aggregate_buckets'),
   ('buckets', 'request_buckets'),
@@ -32,6 +44,12 @@ LIB_FILES = [
   ('buckets', 'ssl_buckets'),
   ('buckets', 'barrier_buckets'),
   ('buckets', 'chunk_buckets'),
+  ('buckets', 'iovec_buckets'),
+  ('auth', 'auth'),
+  ('auth', 'auth_basic'),
+  ('auth', 'auth_digest'),
+  ('auth', 'auth_kerb'),
+  ('auth', 'auth_kerb_gss'),
   ]
 
 TEST_DEPS = [
@@ -40,6 +58,7 @@ TEST_DEPS = [
   ('test', 'test_context'),
   ('test', 'test_buckets'),
   ('test', 'test_ssl'),
+  ('test/server', 'test_server'),
   ]
 
 TEST_HDR_FILES = [
@@ -115,12 +134,14 @@ def usage():
 
 def cmd_build(param):
   builder = Builder(param)
-  builder.build_target(File('.', 'libserf-0', 'la'), False)
+  builder.build_target(File('.', LIBNAME, 'la'), False)
+  builder.build_target(File('.', PCFILE, 'pc'), False)
 
 
 def cmd_install(param):
   builder = Builder(param)
-  builder.install_target(File('.', 'libserf-0', 'la'), False)
+  ### should be called .install_all()
+  builder.install_target(File('.', LIBNAME, 'la'), False)
 
 
 def cmd_check(param):
@@ -143,7 +164,9 @@ def cmd_check(param):
 def cmd_clean(param):
   targets = [File(dirpath, fname, 'o') for dirpath, fname in LIB_FILES]
   targets += [File(dirpath, fname, 'lo') for dirpath, fname in LIB_FILES]
-  targets += [File('.', 'libserf-0', 'la')]
+  targets += [File('.', LIBNAME, 'la'),
+              File('.', PCFILE, 'pc'),
+              ]
   targets += [File(dirpath, fname, 'o') for dirpath, fname in TEST_FILES]
   targets += [File(dirpath, fname, 'lo') for dirpath, fname in TEST_FILES]
   targets += [File(dirpath, fname, None) for dirpath, fname in TEST_FILES]
@@ -160,7 +183,8 @@ def cmd_clean(param):
   else:
     print('Clean.')
 
-class Builder:
+
+class Builder(object):
   def __init__(self, params):
     if 'apr' in params:
       self.apr = APRConfig(params['apr'])
@@ -170,11 +194,14 @@ class Builder:
       self.apu = APUConfig(None)
 
     try:
-      self.libdir = os.path.join(params['prefix'], 'lib')
-      self.includedir = os.path.join(params['prefix'], 'include', 'serf-0')
+      self.prefix = params['prefix']
     except:
-      self.libdir = '/usr/local/lib'
-      self.includedir = '/usr/local/include/serf-0'
+      self.prefix = '/usr/local'
+
+    ### no way to tweak these
+    self.libdir = os.path.join(self.prefix, 'lib')
+    self.pkgconfigdir = os.path.join(self.prefix, 'lib', 'pkgconfig')
+    self.includedir = os.path.join(self.prefix, 'include', INCLUDES)
 
     self.load_vars()
     self.load_deps()
@@ -199,7 +226,8 @@ class Builder:
                 + ' ' + self.apu.get_value(None, '--libs') \
                 + ' ' + self.apr.get_value(None, '--link-libtool') \
                 + ' ' + self.apr.get_value(None, '--libs') \
-                + ' -lz -lssl -lcrypto'
+                + ' -lz'
+    self.SSL_LIBS = '-lssl -lcrypto'
 
     self.MODE = 644
 
@@ -214,14 +242,16 @@ class Builder:
 
     self.hdrs = hdrs
 
-    lib = File('.', 'libserf-0', 'la')
+    all_libs = self.LIBS + ' ' + self.SSL_LIBS
+
+    lib = File('.', LIBNAME, 'la')
     cmd = '%s --silent --mode=link %s %s -rpath %s -o %s %s %s' % (
       self.LIBTOOL, self.CC, self.LDFLAGS, self.libdir,
-      lib.fname, ' '.join([l.fname for l in libobjs]), self.LIBS)
+      lib.fname, ' '.join([l.fname for l in libobjs]), all_libs)
     self._add_dep(lib, libobjs, cmd)
 
     # load the test program dependencies now
-    testhdrs = hdrs
+    testhdrs = copy.deepcopy(hdrs)
     testhdrs += [File(dirpath, fname, 'h') for dirpath, fname in TEST_HDR_FILES]
     testdeps = [File(dirpath, fname, 'c') for dirpath, fname in TEST_DEPS]
     testobjs = [File(dirpath, fname, 'lo') for dirpath, fname in TEST_DEPS]
@@ -241,13 +271,17 @@ class Builder:
         cmd = '%s --silent --mode=link %s %s -static -o %s %s %s %s' % (
           self.LIBTOOL, self.CC, self.LDFLAGS,
           prog.fname, lib.fname, ' '.join([l.fname for l in [obj] + testobjs]), 
-          self.LIBS)
+          all_libs)
         self._add_dep(prog, [lib, obj] + testobjs, cmd)
       else:
         cmd = '%s --silent --mode=link %s %s -static -o %s %s %s %s' % (
           self.LIBTOOL, self.CC, self.LDFLAGS,
-          prog.fname, lib.fname, obj.fname, self.LIBS)
+          prog.fname, lib.fname, obj.fname, all_libs)
         self._add_dep(prog, [lib, obj], cmd)
+
+    # create 'serf-1.pc' if it doesn't exist.
+    pcfile = File('.', PCFILE, 'pc')
+    self._add_dep(pcfile, [], self._write_pcfile)
 
   def _add_compile(self, src, obj, hdrs):
     cmd = '%s --silent --mode=compile %s %s %s %s -c -o %s %s' % (
@@ -266,26 +300,50 @@ class Builder:
         return
     # else non-existent, so it must be rebuilt.
 
+    # Commands that are strings are cmdline invocations. Otherwise, it
+    # should be a callable.
+    if isinstance(cmd, str):
+      cmd = CommandLine(cmd)
+
     # register the dependency so this will get built
     self.deps[target] = deps, cmd
 
+  def _write_pcfile(self):
+    """Generating serf-1.pc ..."""
+
+    open(PCFILE + '.pc', 'w').write(
+"""SERF_MAJOR_VERSION=%d
+prefix=%s
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include/%s
+
+Name: serf
+Description: HTTP client library
+Version: %s
+Requires.private: libssl libcrypto
+Libs: -L${libdir} -lserf-${SERF_MAJOR_VERSION}
+Libs.private: %s
+Cflags: -I${includedir}
+""" % (MAJOR, self.prefix, INCLUDES, get_version(), self.LIBS))
+
   def build_target(self, target, dry_run):
-    dep = self.deps.get(target)
-    if not dep:
+    deps, cmd = self.deps.get(target, (None, None))
+    if cmd is None:
       # it's already up to date. all done.
       return
 
-    for f in dep[0]:
+    for f in deps:
       subdep = self.deps.get(f)
       if subdep:
         self.build_target(f, dry_run)
 
     # build the target now
-    print(dep[1])
+    print(cmd.__doc__)
     if not dry_run:
-      result = os.system(dep[1])
+      result = cmd()
       if result:
-        raise BuildError(dep[1], result)
+        raise BuildError(cmd.__doc__, result)
       # FALLTHROUGH
 
     # it's a dry run. pretend we built the target.
@@ -298,19 +356,26 @@ class Builder:
     # install the target now
     if not dry_run:
 
-      try:
-        os.makedirs(self.includedir)
-        os.makedirs(self.libdir)
-      except:
-        pass
+      for path in (self.libdir, self.pkgconfigdir, self.includedir):
+        if not os.path.exists(path):
+          try:
+            os.makedirs(path)
+          except OSError:
+            raise BuildError('os.makedirs',
+                             'can not create install directories')
 
       for f in self.hdrs:
+        print("Installing: %s" % (os.path.basename(f.fname),))
         shutil.copy(f.fname, self.includedir)
+
+      print("Installing: %s.pc" % (PCFILE,))
+      shutil.copy(PCFILE + '.pc', self.pkgconfigdir)
 
       cmd = '%s --silent --mode=install %s -c -m %d %s %s' % (
             self.LIBTOOL, '/usr/bin/install', self.MODE, target.fname,
             self.libdir)
 
+      print("Installing: %s" % (os.path.basename(target.fname),))
       result = os.system(cmd)
       if result:
         raise BuildError(cmd, result)
@@ -355,6 +420,17 @@ class APUConfig(ConfigScript):
   script_name = 'apu-1-config'
 
 
+class CommandLine(object):
+  """Simple helper to invoke a system command when called."""
+
+  def __init__(self, cmd):
+    self.cmd = cmd
+    self.__doc__ = cmd  # when we print the execution of this command
+
+  def __call__(self):
+    return os.system(self.cmd)
+
+
 class File:
   def __init__(self, dirpath, fname, ext):
     if ext:
@@ -374,6 +450,16 @@ class File:
 
   def __hash__(self):
     return hash(self.fname)
+
+
+def get_version():
+  match = re.search('SERF_MAJOR_VERSION ([0-9]+).*'
+                    'SERF_MINOR_VERSION ([0-9]+).*'
+                    'SERF_PATCH_VERSION ([0-9]+)',
+                    open('serf.h').read(),
+                    re.DOTALL)
+  major, minor, patch = match.groups()
+  return '%s.%s.%s' % (major, minor, patch)
 
 
 class BuildError(Exception):

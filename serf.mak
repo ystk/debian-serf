@@ -13,11 +13,11 @@ CFLAGS = /Zi /W3 /EHsc /I "./"
 !IF "$(DEBUG_BUILD)" == ""
 INTDIR = Release
 CFLAGS = /MD /O2 /D "NDEBUG" $(CFLAGS)
-STATIC_LIB = $(INTDIR)\serf.lib
+STATIC_LIB = $(INTDIR)\serf-1.lib
 !ELSE
 INTDIR = Debug
 CFLAGS = /MDd /Od /W3 /Gm /D "_DEBUG" $(CFLAGS)
-STATIC_LIB = $(INTDIR)\serf.lib
+STATIC_LIB = $(INTDIR)\serf-1.lib
 !ENDIF
 
 ########
@@ -90,16 +90,23 @@ ZLIB_LIBS = "$(ZLIB_SRC)\zlibdll.lib"
 
 
 # Exclude stuff we don't need from the Win32 headers
-WIN32_DEFS = /D WIN32 /D WIN32_LEAN_AND_MEAN /D NOUSER /D NOGDI /D NONLS /D NOCRYPT
+WIN32_DEFS = /D WIN32 /D WIN32_LEAN_AND_MEAN /D NOUSER /D NOGDI /D NONLS /D NOCRYPT /D SERF_HAVE_SSPI
 
 CPP=cl.exe
-CPP_PROJ = /c /nologo $(CFLAGS) $(WIN32_DEFS) $(EXPAT_FLAGS) $(APR_FLAGS) $(APRUTIL_FLAGS) $(OPENSSL_FLAGS) $(ZLIB_FLAGS) /Fo"$(INTDIR)\\" /Fd"$(INTDIR)\\"
+CPP_PROJ = /c /nologo $(CFLAGS) $(WIN32_DEFS) $(APR_FLAGS) $(APRUTIL_FLAGS) $(OPENSSL_FLAGS) $(ZLIB_FLAGS) /Fo"$(INTDIR)\\" /Fd"$(INTDIR)\\"
 LIB32=link.exe
 LIB32_FLAGS=/nologo
 
 LIB32_OBJS= \
     "$(INTDIR)\aggregate_buckets.obj" \
+    "$(INTDIR)\auth.obj" \
+    "$(INTDIR)\auth_basic.obj" \
+    "$(INTDIR)\auth_digest.obj" \
+    "$(INTDIR)\auth_kerb.obj" \
+    "$(INTDIR)\auth_kerb_gss.obj" \
+    "$(INTDIR)\auth_kerb_sspi.obj" \
     "$(INTDIR)\context.obj" \
+    "$(INTDIR)\ssltunnel.obj" \
     "$(INTDIR)\allocator.obj" \
     "$(INTDIR)\barrier_buckets.obj" \
     "$(INTDIR)\buckets.obj" \
@@ -108,8 +115,11 @@ LIB32_OBJS= \
     "$(INTDIR)\deflate_buckets.obj" \
     "$(INTDIR)\file_buckets.obj" \
     "$(INTDIR)\headers_buckets.obj" \
+    "$(INTDIR)\incoming.obj" \
+    "$(INTDIR)\iovec_buckets.obj" \
     "$(INTDIR)\limit_buckets.obj" \
     "$(INTDIR)\mmap_buckets.obj" \
+    "$(INTDIR)\outgoing.obj" \
     "$(INTDIR)\request_buckets.obj" \
     "$(INTDIR)\response_buckets.obj" \
     "$(INTDIR)\simple_buckets.obj" \
@@ -126,6 +136,8 @@ LIB32_OBJS = $(LIB32_OBJS) "$(OPENSSL_SRC)\out32dll\libeay32.lib" \
 
 LIB32_OBJS = $(LIB32_OBJS) $(APR_LIBS) $(APRUTIL_LIBS) $(ZLIB_LIBS) 
 
+SYS_LIBS = secur32.lib
+
 TEST_OBJS = \
     "$(INTDIR)\CuTest.obj" \
     "$(INTDIR)\test_all.obj" \
@@ -133,6 +145,10 @@ TEST_OBJS = \
     "$(INTDIR)\test_context.obj" \
     "$(INTDIR)\test_buckets.obj" \
     "$(INTDIR)\test_ssl.obj" \
+    "$(INTDIR)\test_server.obj" \
+
+TEST_LIBS = user32.lib advapi32.lib gdi32.lib ws2_32.lib
+
 
 ALL: INTDIR $(STATIC_LIB) TESTS
 
@@ -155,11 +171,16 @@ CHECK: INTDIR TESTS
   
 "$(STATIC_LIB)": INTDIR $(LIB32_OBJS)
   $(LIB32) -lib @<<
-    $(LIB32_FLAGS) $(LIB32_OBJS) /OUT:$@
+    $(LIB32_FLAGS) $(LIB32_OBJS) $(SYS_LIBS) /OUT:$@
 <<
 
 
 .c{$(INTDIR)}.obj:
+  $(CPP) @<<
+    $(CPP_PROJ) $<
+<<
+
+{auth}.c{$(INTDIR)}.obj:
   $(CPP) @<<
     $(CPP_PROJ) $<
 <<
@@ -174,14 +195,19 @@ CHECK: INTDIR TESTS
     $(CPP_PROJ) $<
 <<
 
+{test\server}.c{$(INTDIR)}.obj: 
+  $(CPP) @<<
+    $(CPP_PROJ) $<
+<<
+
 $(INTDIR)\serf_response.exe: $(INTDIR)\serf_response.obj $(STATIC_LIB)
-  $(LIB32) /DEBUG /OUT:$@ $** $(LIB32_FLAGS)
+  $(LIB32) /DEBUG /OUT:$@ $** $(LIB32_FLAGS) $(TEST_LIBS)
 
 $(INTDIR)\serf_get.exe: $(INTDIR)\serf_get.obj $(STATIC_LIB)
-  $(LIB32) /OUT:$@ $** $(LIB32_FLAGS)
+  $(LIB32) /DEBUG /OUT:$@ $** $(LIB32_FLAGS) $(TEST_LIBS)
 
 $(INTDIR)\serf_request.exe: $(INTDIR)\serf_request.obj $(STATIC_LIB)
-  $(LIB32) /OUT:$@ $** $(LIB32_FLAGS)
+  $(LIB32) /DEBUG /OUT:$@ $** $(LIB32_FLAGS) $(TEST_LIBS)
 
 $(INTDIR)\test_all.exe: $(TEST_OBJS) $(STATIC_LIB)
-  $(LIB32) /DEBUG /OUT:$@ $** $(LIB32_FLAGS)
+  $(LIB32) /DEBUG /OUT:$@ $** $(LIB32_FLAGS) $(TEST_LIBS)
