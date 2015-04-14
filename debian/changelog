@@ -1,3 +1,93 @@
+serf (1.3.8-1) unstable; urgency=medium
+
+  * New upstream release
+    - Disable SSLv2 and SSLv3
+  * Backport r2445 from upstream to fix potential memory allocation failures
+    in the test suite.
+  * Backport r2443 from upstream to fix a compile failure in the test suite.
+
+ -- James McCoy <jamessan@debian.org>  Thu, 04 Dec 2014 19:06:24 -0500
+
+serf (1.3.7-3) unstable; urgency=medium
+
+  * Specify the proper prefix/libdir when building libserf-1.pc.
+    (Closes: LP: #1388271)
+
+ -- James McCoy <jamessan@debian.org>  Mon, 17 Nov 2014 21:12:38 -0500
+
+serf (1.3.7-2) unstable; urgency=medium
+
+  * debian/control:
+    + Bump versioned Build-Depends on scons >= 2.3.1-2 to ensure we have an
+      scons which can understand krb5-config's use of -isystem (c.f., #760804).
+    + Add libssl-dev/zlib1g-dev to Build-Depends as they're needed to build
+      and no longer transitively pulled in.  (Closes: #768664)
+
+ -- James McCoy <jamessan@debian.org>  Sun, 09 Nov 2014 14:11:13 -0500
+
+serf (1.3.7-1) unstable; urgency=medium
+
+  * New upstream release
+    + Includes security fix:
+      - CVE-2014-3504: Improper validation of certificate with host mismatch
+        (Closes: #757965)
+  * control: Pre-Depend on ${misc:Pre-Depends} instead of hard-coding
+    multiarch-support.
+  * control: Add Vcs-* fields.
+
+ -- James McCoy <jamessan@debian.org>  Tue, 12 Aug 2014 23:32:58 -0400
+
+serf (1.3.6-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- James McCoy <jamessan@debian.org>  Fri, 13 Jun 2014 23:46:01 -0400
+
+serf (1.3.5-1) unstable; urgency=medium
+
+  * New upstream release
+    + Update test certificates.  Fixes FTBFS.  (Closes: #746129)
+  * debian/rules: Specify PREFIX/LIBDIR only when running “scons install”.
+    They're unnecessary for the other scons calls, but mandatory for the
+    install target, otherwise the install tries to use upstream defaults.
+  * debian/watch: Scrape https://code.google.com/p/serf/ instead of the
+    download page since the download page isn't being updated.
+
+ -- James McCoy <jamessan@debian.org>  Mon, 28 Apr 2014 20:23:40 -0400
+
+serf (1.3.4-2) unstable; urgency=medium
+
+  * Enable Kerberos/GSSAPI support (Closes: #740717)
+    + d/control: Add libkrb5-dev
+    + d/rules: Tell scons where to find GSSAPI
+  * Link with -Wl,--as-needed to avoid unnecessary dependencies
+
+ -- James McCoy <jamessan@debian.org>  Tue, 04 Mar 2014 23:06:00 -0500
+
+serf (1.3.4-1) unstable; urgency=medium
+
+  * New upstream version
+  * Bump Standards-Version to 3.9.5
+
+ -- James McCoy <jamessan@debian.org>  Sun, 09 Feb 2014 22:53:33 -0500
+
+serf (1.3.3-1) unstable; urgency=low
+
+  * Add myself to Uploaders.
+  * Change the watch file to better handle code.google.com.
+  * New upstream release.  (Closes: #716793)
+    + Refresh patches/libtool
+    + Update symbols
+  * Adapt packaging for the upstream switch to SCons.
+    + control: + scons, - autotools-dev, autoconf
+    + rules: Change configure/make calls to scons
+  * Rename libserf1 to libserf-1-1, following standard naming conventions.
+  * Enable hardening flags.
+  * Strip unnecessary RPATH from libserf.
+  * Honor DEB_BUILD_OPTIONS=parallel=X
+
+ -- James McCoy <jamessan@debian.org>  Tue, 31 Dec 2013 13:17:16 -0500
+
 serf (1.1.0-2) unstable; urgency=low
 
   * Upload to unstable.

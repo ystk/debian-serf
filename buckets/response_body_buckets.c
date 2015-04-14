@@ -17,31 +17,38 @@
 
 #include "serf.h"
 #include "serf_bucket_util.h"
-#include "serf_private.h"
+
+/* Older versions of APR do not have this macro.  */
+#ifdef APR_SIZE_MAX
+#define REQUESTED_MAX APR_SIZE_MAX
+#else
+#define REQUESTED_MAX (~((apr_size_t)0))
+#endif
+
 
 typedef struct {
     serf_bucket_t *stream;
     apr_uint64_t remaining;
-} limit_context_t;
+} body_context_t;
 
-
-serf_bucket_t *serf_bucket_limit_create(
+serf_bucket_t *serf_bucket_response_body_create(
     serf_bucket_t *stream, apr_uint64_t len, serf_bucket_alloc_t *allocator)
 {
-    limit_context_t *ctx;
+    body_context_t *ctx;
 
     ctx = serf_bucket_mem_alloc(allocator, sizeof(*ctx));
     ctx->stream = stream;
     ctx->remaining = len;
 
-    return serf_bucket_create(&serf_bucket_type_limit, allocator, ctx);
+    return serf_bucket_create(&serf_bucket_type_response_body, allocator, ctx);
 }
 
-static apr_status_t serf_limit_read(serf_bucket_t *bucket,
-                                    apr_size_t requested,
-                                    const char **data, apr_size_t *len)
+static apr_status_t serf_response_body_read(serf_bucket_t *bucket,
+                                            apr_size_t requested,
+                                            const char **data,
+                                            apr_size_t *len)
 {
-    limit_context_t *ctx = bucket->data;
+    body_context_t *ctx = bucket->data;
     apr_status_t status;
 
     if (!ctx->remaining) {
@@ -63,19 +70,20 @@ static apr_status_t serf_limit_read(serf_bucket_t *bucket,
         ctx->remaining -= *len;
     }
 
-    /* If we have met our limit and don't have a status, return EOF. */
-    if (!ctx->remaining && !status) {
-        status = APR_EOF;
+    if (APR_STATUS_IS_EOF(status) && ctx->remaining > 0) {
+        /* The server sent less data than expected. */
+        status = SERF_ERROR_TRUNCATED_HTTP_RESPONSE;
     }
 
     return status;
 }
 
-static apr_status_t serf_limit_readline(serf_bucket_t *bucket,
-                                         int acceptable, int *found,
-                                         const char **data, apr_size_t *len)
+static apr_status_t serf_response_body_readline(serf_bucket_t *bucket,
+                                                int acceptable, int *found,
+                                                const char **data,
+                                                apr_size_t *len)
 {
-    limit_context_t *ctx = bucket->data;
+    body_context_t *ctx = bucket->data;
     apr_status_t status;
 
     if (!ctx->remaining) {
@@ -89,39 +97,39 @@ static apr_status_t serf_limit_readline(serf_bucket_t *bucket,
         ctx->remaining -= *len;
     }
 
-    /* If we have met our limit and don't have a status, return EOF. */
-    if (!ctx->remaining && !status) {
-        status = APR_EOF;
+    if (APR_STATUS_IS_EOF(status) && ctx->remaining > 0) {
+        /* The server sent less data than expected. */
+        status = SERF_ERROR_TRUNCATED_HTTP_RESPONSE;
     }
 
     return status;
 }
 
-static apr_status_t serf_limit_peek(serf_bucket_t *bucket,
-                                     const char **data,
-                                     apr_size_t *len)
+static apr_status_t serf_response_body_peek(serf_bucket_t *bucket,
+                                            const char **data,
+                                            apr_size_t *len)
 {
-    limit_context_t *ctx = bucket->data;
+    body_context_t *ctx = bucket->data;
 
     return serf_bucket_peek(ctx->stream, data, len);
 }
 
-static void serf_limit_destroy(serf_bucket_t *bucket)
+static void serf_response_body_destroy(serf_bucket_t *bucket)
 {
-    limit_context_t *ctx = bucket->data;
+    body_context_t *ctx = bucket->data;
 
     serf_bucket_destroy(ctx->stream);
 
     serf_default_destroy_and_data(bucket);
 }
 
-const serf_bucket_type_t serf_bucket_type_limit = {
-    "LIMIT",
-    serf_limit_read,
-    serf_limit_readline,
+const serf_bucket_type_t serf_bucket_type_response_body = {
+    "RESPONSE_BODY",
+    serf_response_body_read,
+    serf_response_body_readline,
     serf_default_read_iovec,
     serf_default_read_for_sendfile,
     serf_default_read_bucket,
-    serf_limit_peek,
-    serf_limit_destroy,
+    serf_response_body_peek,
+    serf_response_body_destroy,
 };

@@ -20,6 +20,8 @@
 #include "serf.h"
 #include "serf_bucket_util.h"
 
+#include "serf_private.h" /* for serf__bucket_headers_remove */
+
 
 typedef struct header_list {
     const char *header;
@@ -37,6 +39,7 @@ typedef struct header_list {
 
 typedef struct {
     header_list_t *list;
+    header_list_t *last;
 
     header_list_t *cur_read;
     enum {
@@ -60,6 +63,7 @@ serf_bucket_t *serf_bucket_headers_create(
 
     ctx = serf_bucket_mem_alloc(allocator, sizeof(*ctx));
     ctx->list = NULL;
+    ctx->last = NULL;
     ctx->state = READ_START;
 
     return serf_bucket_create(&serf_bucket_type_headers, allocator, ctx);
@@ -71,7 +75,6 @@ void serf_bucket_headers_setx(
     const char *value, apr_size_t value_size, int value_copy)
 {
     headers_context_t *ctx = bkt->data;
-    header_list_t *iter = ctx->list;
     header_list_t *hdr;
 
 #if 0
@@ -105,13 +108,12 @@ void serf_bucket_headers_setx(
     }
 
     /* Add the new header at the end of the list. */
-    while (iter && iter->next) {
-        iter = iter->next;
-    }
-    if (iter)
-        iter->next = hdr;
+    if (ctx->last)
+        ctx->last->next = hdr;
     else
         ctx->list = hdr;
+
+    ctx->last = hdr;
 }
 
 void serf_bucket_headers_set(
@@ -163,11 +165,11 @@ const char *serf_bucket_headers_get(
                    be comma-separated, that is clearly the correct behavior;
                    for others, the correct behavior is undefined anyway. */
 
-                /* The "+1" is for the comma; serf_bstrmemdup() will also add
-                   one slot for the terminating '\0'. */
+                /* The "+1" is for the comma; the +1 in the alloc
+                   call is for the terminating '\0' */
                 apr_size_t new_size = found->value_size + value_size + 1;
                 char *new_val = serf_bucket_mem_alloc(headers_bucket->allocator,
-                                                      new_size);
+                                                      new_size + 1);
                 memcpy(new_val, val, value_size);
                 new_val[value_size] = ',';
                 memcpy(new_val + value_size + 1, found->value,
@@ -189,6 +191,29 @@ const char *serf_bucket_headers_get(
     }
 
     return val;
+}
+
+void serf__bucket_headers_remove(serf_bucket_t *bucket, const char *header)
+{
+    headers_context_t *ctx = bucket->data;
+    header_list_t *scan = ctx->list, *prev = NULL;
+
+    /* Find and delete all items with the same header (case insensitive) */
+    while (scan) {
+        if (strcasecmp(scan->header, header) == 0) {
+            if (prev) {
+                prev->next = scan->next;
+            } else {
+                ctx->list = scan->next;
+            }
+            if (ctx->last == scan) {
+                ctx->last = NULL;
+            }
+        } else {
+            prev = scan;
+        }
+        scan = scan->next;
+    }
 }
 
 void serf_bucket_headers_do(
@@ -325,8 +350,10 @@ static apr_status_t serf_headers_read(serf_bucket_t *bucket,
     apr_size_t avail;
 
     select_value(ctx, data, &avail);
-    if (ctx->state == READ_DONE)
+    if (ctx->state == READ_DONE) {
+        *len = avail;
         return APR_EOF;
+    }
 
     if (requested >= avail) {
         /* return everything from this chunk */

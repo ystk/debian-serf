@@ -68,13 +68,13 @@ static apr_status_t handle_response(serf_request_t *request,
     apr_status_t status;
     serf_status_line sl;
     req_ctx_t *ctx = handler_baton;
+    serf_connection_t *conn = request->conn;
 
-    if (! response) {
-        serf_connection_request_create(request->conn,
-                                       setup_request,
-                                       ctx);
+    /* CONNECT request was cancelled. Assuming that this is during connection
+       reset, we can safely discard the request as a new one will be created
+       when setting up the next connection. */
+    if (!response)
         return APR_SUCCESS;
-    }
 
     status = serf_bucket_response_status(response, &sl);
     if (SERF_BUCKET_READ_ERROR(status)) {
@@ -91,21 +91,47 @@ static apr_status_t handle_response(serf_request_t *request,
         return status;
     }
 
-    /* Body is supposed to be empty. */
-    if (sl.code == 200) {
-        request->conn->state = SERF_CONN_CONNECTED;
+    /* RFC 2817:  Any successful (2xx) response to a CONNECT request indicates
+       that the proxy has established a connection to the requested host and
+       port, and has switched to tunneling the current connection to that server
+       connection.
+    */
+    if (sl.code >= 200 && sl.code < 300) {
+        serf_bucket_t *hdrs;
+        const char *val;
 
+        conn->state = SERF_CONN_CONNECTED;
+
+        /* Body is supposed to be empty. */
         apr_pool_destroy(ctx->pool);
-        serf_bucket_destroy(request->conn->ssltunnel_ostream);
-        request->conn->stream = NULL;
+        serf_bucket_destroy(conn->ssltunnel_ostream);
+        serf_bucket_destroy(conn->stream);
+        conn->stream = NULL;
         ctx = NULL;
+
+        serf__log_skt(CONN_VERBOSE, __FILE__, conn->skt,
+                      "successfully set up ssl tunnel.\n");
+
+        /* Fix for issue #123: ignore the "Connection: close" header here,
+           leaving the header in place would make the serf's main context
+           loop close this connection immediately after reading the 200 OK
+           response. */
+
+        hdrs = serf_bucket_response_get_headers(response);
+        val = serf_bucket_headers_get(hdrs, "Connection");
+        if (val && strcasecmp("close", val) == 0) {
+            serf__log_skt(CONN_VERBOSE, __FILE__, conn->skt,
+                      "Ignore Connection: close header on this reponse, don't "
+                      "close the connection now that the tunnel is set up.\n");
+            serf__bucket_headers_remove(hdrs, "Connection");
+        }
 
         return APR_EOF;
     }
 
-    /* Authentication failure and 200 Ok are handled at this point,
+    /* Authentication failure and 2xx Ok are handled at this point,
        the rest are errors. */
-    return APR_EGENERAL; /* TODO: better error code */
+    return SERF_ERROR_SSLTUNNEL_SETUP_FAILED;
 }
 
 /* Prepare the CONNECT request. */
@@ -150,19 +176,20 @@ apr_status_t serf__ssltunnel_connect(serf_connection_t *conn)
 
     ctx = apr_palloc(ssltunnel_pool, sizeof(*ctx));
     ctx->pool = ssltunnel_pool;
-    ctx->uri = apr_psprintf(ctx->pool, "%s:%d", conn->host_info.hostinfo,
+    ctx->uri = apr_psprintf(ctx->pool, "%s:%d", conn->host_info.hostname,
                             conn->host_info.port);
 
     conn->ssltunnel_ostream = serf__bucket_stream_create(conn->allocator,
                                                          detect_eof,
                                                          conn);
 
-    /* TODO: should be the first request on the connection. */
-    serf_connection_priority_request_create(conn,
-                                            setup_request,
-                                            ctx);
+    serf__ssltunnel_request_create(conn,
+                                   setup_request,
+                                   ctx);
 
     conn->state = SERF_CONN_SETUP_SSLTUNNEL;
+    serf__log_skt(CONN_VERBOSE, __FILE__, conn->skt,
+                  "setting up ssl tunnel on connection.\n");
 
     return APR_SUCCESS;
 }

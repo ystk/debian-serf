@@ -1,14 +1,13 @@
---- a/configure.in
-+++ b/configure.in
-@@ -199,9 +199,9 @@ AC_SEARCH_LIBS(fabs, m)
- 
- libs=""
- if test -n "$apu_config"; then
--  APR_ADDTO(libs, [`$apu_config --link-libtool --libs`])
-+  APR_ADDTO(libs, [`$apu_config --link-ld`])
- fi
--APR_ADDTO(libs, [`$apr_config --link-libtool --libs` $LIBS])
-+APR_ADDTO(libs, [`$apr_config --link-ld` $LIBS])
- 
- APR_ADDTO(SERF_LIBS, [$libs])
- AC_SUBST(SERF_LIBS)
+--- a/SConstruct
++++ b/SConstruct
+@@ -345,8 +345,8 @@ else:
+   ### there is probably a better way to run/capture output.
+   ### env.ParseConfig() may be handy for getting this stuff into the build
+   if CALLOUT_OKAY:
+-    apr_libs = os.popen(env.subst('$APR --link-libtool --libs')).read().strip()
+-    apu_libs = os.popen(env.subst('$APU --link-libtool --libs')).read().strip()
++    apr_libs = os.popen(env.subst('$APR --link-ld')).read().strip()
++    apu_libs = os.popen(env.subst('$APU --link-ld')).read().strip()
+   else:
+     apr_libs = ''
+     apu_libs = ''

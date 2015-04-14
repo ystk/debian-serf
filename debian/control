@@ -2,16 +2,22 @@ Source: serf
 Section: libs
 Priority: optional
 Maintainer: Peter Samuelson <peter@p12n.org>
+Uploaders: James McCoy <jamessan@debian.org>
 Build-Depends: dpkg-dev (>= 1.16.0~), debhelper,
-    quilt, autoconf, autotools-dev, libapr1-dev, libaprutil1-dev
-Standards-Version: 3.9.3
+# Required scons version to understand -isystem, exported by krb5-config's
+# CFLAGS as of 1.12.1+dfsg-9
+ scons (>= 2.3.1-2),
+ quilt, libapr1-dev, libaprutil1-dev, chrpath, libkrb5-dev, zlib1g-dev,
+ libssl-dev
+Standards-Version: 3.9.5
 Homepage: http://code.google.com/p/serf/
+Vcs-Git: git://anonscm.debian.org/collab-maint/pkg-serf.git
+Vcs-Browser: http://anonscm.debian.org/cgit/collab-maint/pkg-serf.git/
 
-Package: libserf1
-Section: libs
+Package: libserf-1-1
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Pre-Depends: multiarch-support
+Pre-Depends: ${misc:Pre-Depends}
 Multi-Arch: same
 Description: high-performance asynchronous HTTP client library
  serf library is a C-based HTTP client library built upon the Apache
@@ -23,10 +29,7 @@ Description: high-performance asynchronous HTTP client library
 Package: libserf-dev
 Section: libdevel
 Architecture: any
-Depends: libserf1 (= ${binary:Version}), ${misc:Depends}, libapr1-dev, libaprutil1-dev
-Replaces: libserf-0-0 (<< 0.3.0-1), libserf-0-0-dev
-Conflicts: libserf-0-0-dev
-Provides: libserf-0-0-dev
+Depends: libserf-1-1 (= ${binary:Version}), ${misc:Depends}, libapr1-dev, libaprutil1-dev
 Description: high-performance asynchronous HTTP client library headers
  serf library is a C-based HTTP client library built upon the Apache
  Portable Runtime (APR) library.  It multiplexes connections, running the
@@ -41,7 +44,7 @@ Section: debug
 Priority: extra
 Architecture: any
 Multi-Arch: same
-Depends: libserf1 (= ${binary:Version}), ${misc:Depends}
+Depends: libserf-1-1 (= ${binary:Version}), ${misc:Depends}
 Provides: libserf-dbg
 Description: high-performance asynchronous HTTP client library debugging symbols
  serf library is a C-based HTTP client library built upon the Apache

@@ -1,5 +1,2 @@
-# Watch control file for uscan
-
 version=3
-http://code.google.com/p/serf/ \
-  http://serf.googlecode.com/files/serf-(.*).tar.bz2
+https://code.google.com/p/serf/ https?://serf.googlecode.com/svn/src_releases/serf-(.*).tar.bz2
