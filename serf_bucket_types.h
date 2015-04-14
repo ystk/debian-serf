@@ -85,6 +85,8 @@ serf_bucket_t *serf_bucket_response_create(
 #define SERF_HTTP_VERSION(major, minor)  ((major) * 1000 + (minor))
 #define SERF_HTTP_11 SERF_HTTP_VERSION(1, 1)
 #define SERF_HTTP_10 SERF_HTTP_VERSION(1, 0)
+#define SERF_HTTP_VERSION_MAJOR(shv) ((int)shv / 1000)
+#define SERF_HTTP_VERSION_MINOR(shv) ((int)shv % 1000)
 
 typedef struct {
     int version;
@@ -126,6 +128,16 @@ serf_bucket_t *serf_bucket_response_get_headers(
  */
 void serf_bucket_response_set_head(
     serf_bucket_t *bucket);
+
+/* ==================================================================== */
+
+extern const serf_bucket_type_t serf_bucket_type_response_body;
+#define SERF_BUCKET_IS_RESPONSE_BODY(b) SERF_BUCKET_CHECK((b), response_body)
+
+serf_bucket_t *serf_bucket_response_body_create(
+    serf_bucket_t *stream,
+    apr_uint64_t limit,
+    serf_bucket_alloc_t *allocator);
 
 /* ==================================================================== */
 
@@ -291,6 +303,16 @@ serf_bucket_t *serf_bucket_simple_create(
  * ownership of a private copy of the data.
  */
 serf_bucket_t *serf_bucket_simple_copy_create(
+    const char *data,
+    apr_size_t len,
+    serf_bucket_alloc_t *allocator);
+
+/**
+ * Equivalent to serf_bucket_simple_create, except that the bucket assumes
+ * responsibility for freeing the data on this allocator without making
+ * a copy.  It is assumed that data was created by a call from allocator.
+ */
+serf_bucket_t *serf_bucket_simple_own_create(
     const char *data,
     apr_size_t len,
     serf_bucket_alloc_t *allocator);
@@ -471,6 +493,7 @@ serf_bucket_t *serf_bucket_limit_create(
 #define SERF_SSL_CERT_UNKNOWNCA         4
 #define SERF_SSL_CERT_SELF_SIGNED       8
 #define SERF_SSL_CERT_UNKNOWN_FAILURE  16
+#define SERF_SSL_CERT_REVOKED          32
 
 extern const serf_bucket_type_t serf_bucket_type_ssl_encrypt;
 #define SERF_BUCKET_IS_SSL_ENCRYPT(b) SERF_BUCKET_CHECK((b), ssl_encrypt)
@@ -566,7 +589,7 @@ apr_hash_t *serf_ssl_cert_subject(
 
 /**
  * Extract the fields of the certificate in a table with keys (sha1, notBefore,
- * notAfter). The returned table will be allocated in @a pool.
+ * notAfter, subjectAltName). The returned table will be allocated in @a pool.
  */
 apr_hash_t *serf_ssl_cert_certificate(
     const serf_ssl_certificate_t *cert,
@@ -598,6 +621,15 @@ apr_status_t serf_ssl_load_cert_file(
 apr_status_t serf_ssl_trust_cert(
     serf_ssl_context_t *ssl_ctx,
     serf_ssl_certificate_t *cert);
+
+/**
+ * Enable or disable SSL compression on a SSL session.
+ * @a enabled = 1 to enable compression, 0 to disable compression.
+ * Default = disabled.
+ */
+apr_status_t serf_ssl_use_compression(
+    serf_ssl_context_t *ssl_ctx,
+    int enabled);
 
 serf_bucket_t *serf_bucket_ssl_encrypt_create(
     serf_bucket_t *stream,

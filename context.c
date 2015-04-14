@@ -22,20 +22,6 @@
 
 #include "serf_private.h"
 
-/* Older versions of APR do not have the APR_VERSION_AT_LEAST macro. Those
-   implementations are safe.
-
-   If the macro *is* defined, and we're on WIN32, and APR is version 1.4.0,
-   then we have a broken WSAPoll() implementation.
-
-   See serf_context_create_ex() below.  */
-#if defined(APR_VERSION_AT_LEAST) && defined(WIN32)
-#if APR_VERSION_AT_LEAST(1,4,0)
-#define BROKEN_WSAPOLL
-#endif
-#endif
-
-
 /**
  * Callback function (implements serf_progress_t). Takes a number of bytes
  * read @a read and bytes written @a written, adds those to the total for this
@@ -149,6 +135,12 @@ serf_context_t *serf_context_create_ex(
     else {
         /* build the pollset with a (default) number of connections */
         serf_pollset_t *ps = apr_pcalloc(pool, sizeof(*ps));
+
+        /* ### TODO: As of APR 1.4.x apr_pollset_create_ex can return a status
+           ### other than APR_SUCCESS, so we should handle it.
+           ### Probably move creation of the pollset to later when we have
+           ### the possibility of returning status to the caller.
+         */
 #ifdef BROKEN_WSAPOLL
         /* APR 1.4.x switched to using WSAPoll() on Win32, but it does not
          * properly handle errors on a non-blocking sockets (such as
@@ -176,6 +168,7 @@ serf_context_t *serf_context_create_ex(
     ctx->progress_written = 0;
 
     ctx->authn_types = SERF_AUTHN_ALL;
+    ctx->server_authn_info = apr_hash_make(pool);
 
     return ctx;
 }
@@ -283,10 +276,21 @@ apr_status_t serf_context_run(
 
     if ((status = apr_pollset_poll(ps->pollset, duration, &num,
                                    &desc)) != APR_SUCCESS) {
+        /* EINTR indicates a handled signal happened during the poll call,
+           ignore, the application can safely retry. */
+        if (APR_STATUS_IS_EINTR(status))
+            return APR_SUCCESS;
+
         /* ### do we still need to dispatch stuff here?
            ### look at the potential return codes. map to our defined
            ### return values? ...
         */
+
+        /* Use the strict documented error for poll timeouts, to allow proper
+           handling of the other timeout types when returned from
+           serf_event_trigger */
+        if (APR_STATUS_IS_TIMEUP(status))
+            return APR_TIMEUP; /* Return the documented error */
         return status;
     }
 
@@ -354,6 +358,14 @@ const char *serf_error_string(apr_status_t errcode)
         return "An error occurred during decompression";
     case SERF_ERROR_BAD_HTTP_RESPONSE:
         return "The server sent an improper HTTP response";
+    case SERF_ERROR_TRUNCATED_HTTP_RESPONSE:
+        return "The server sent a truncated HTTP response body.";
+    case SERF_ERROR_ABORTED_CONNECTION:
+        return "The server unexpectedly closed the connection.";
+    case SERF_ERROR_SSL_COMM_FAILED:
+        return "An error occurred during SSL communication";
+    case SERF_ERROR_SSL_CERT_FAILED:
+        return "An SSL certificate related error occurred ";
     case SERF_ERROR_AUTHN_FAILED:
         return "An error occurred during authentication";
     case SERF_ERROR_AUTHN_NOT_SUPPORTED:
@@ -362,7 +374,9 @@ const char *serf_error_string(apr_status_t errcode)
         return "An authentication attribute is missing";
     case SERF_ERROR_AUTHN_INITALIZATION_FAILED:
         return "Initialization of an authentication type failed";
-
+    case SERF_ERROR_SSLTUNNEL_SETUP_FAILED:
+        return "The proxy server returned an error while setting up the "
+               "SSL tunnel.";
     default:
         return NULL;
     }

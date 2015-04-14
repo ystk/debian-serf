@@ -17,7 +17,7 @@
 
 #include "serf.h"
 #include "serf_bucket_util.h"
-
+#include "serf_private.h"
 
 serf_bucket_t *serf_bucket_create(
     const serf_bucket_type_t *type,
@@ -155,6 +155,32 @@ char *serf_bstrdup(serf_bucket_alloc_t *allocator,
     return newstr;
 }
 
+char *serf_bstrcatv(serf_bucket_alloc_t *allocator, struct iovec *vec,
+                    int vecs, apr_size_t *bytes_written)
+{
+    int i;
+    apr_size_t new_len = 0;
+    char *c, *newstr;
+
+    for (i = 0; i < vecs; i++) {
+        new_len += vec[i].iov_len;
+    }
+
+    /* It's up to the caller to free this memory later. */
+    newstr = serf_bucket_mem_alloc(allocator, new_len);
+
+    c = newstr;
+    for (i = 0; i < vecs; i++) {
+        memcpy(c, vec[i].iov_base, vec[i].iov_len);
+        c += vec[i].iov_len;
+    }
+
+    if (bytes_written) {
+        *bytes_written = c - newstr;
+    }
+
+    return newstr;
+}
 
 /* ==================================================================== */
 
@@ -464,11 +490,10 @@ apr_status_t serf_linebuf_fetch(
 
                 /* Whatever was read, the line is now ready for use. */
                 linebuf->state = SERF_LINEBUF_READY;
+            } else {
+                /* no data available, try again later. */
+                return APR_EAGAIN;
             }
-            /* ### we need data. gotta check this char. bail if zero?! */
-            /* else len == 0 */
-
-            /* ### status */
         }
         else {
             int found;
@@ -536,3 +561,80 @@ apr_status_t serf_linebuf_fetch(
     }
     /* NOTREACHED */
 }
+
+/* Logging functions.
+   Use with one of the [COMP]_VERBOSE defines so that the compiler knows to
+   optimize this code out when no logging is needed. */
+static void log_time()
+{
+    apr_time_exp_t tm;
+
+    apr_time_exp_lt(&tm, apr_time_now());
+    fprintf(stderr, "[%d-%02d-%02dT%02d:%02d:%02d.%06d%+03d] ",
+            1900 + tm.tm_year, 1 + tm.tm_mon, tm.tm_mday,
+            tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_usec,
+            tm.tm_gmtoff/3600);
+}
+
+void serf__log(int verbose_flag, const char *filename, const char *fmt, ...)
+{
+    va_list argp;
+
+    if (verbose_flag) {
+        log_time();
+
+        if (filename)
+            fprintf(stderr, "%s: ", filename);
+
+        va_start(argp, fmt);
+        vfprintf(stderr, fmt, argp);
+        va_end(argp);
+    }
+}
+
+void serf__log_nopref(int verbose_flag, const char *fmt, ...)
+{
+    va_list argp;
+
+    if (verbose_flag) {
+        va_start(argp, fmt);
+        vfprintf(stderr, fmt, argp);
+        va_end(argp);
+    }
+}
+
+void serf__log_skt(int verbose_flag, const char *filename, apr_socket_t *skt,
+                   const char *fmt, ...)
+{
+    va_list argp;
+
+    if (verbose_flag) {
+        apr_sockaddr_t *sa;
+        log_time();
+
+        if (skt) {
+            /* Log local and remote ip address:port */
+            fprintf(stderr, "[l:");
+            if (apr_socket_addr_get(&sa, APR_LOCAL, skt) == APR_SUCCESS) {
+                char buf[32];
+                apr_sockaddr_ip_getbuf(buf, 32, sa);
+                fprintf(stderr, "%s:%d", buf, sa->port);
+            }
+            fprintf(stderr, " r:");
+            if (apr_socket_addr_get(&sa, APR_REMOTE, skt) == APR_SUCCESS) {
+                char buf[32];
+                apr_sockaddr_ip_getbuf(buf, 32, sa);
+                fprintf(stderr, "%s:%d", buf, sa->port);
+            }
+            fprintf(stderr, "] ");
+        }
+
+        if (filename)
+            fprintf(stderr, "%s: ", filename);
+
+        va_start(argp, fmt);
+        vfprintf(stderr, fmt, argp);
+        va_end(argp);
+    }
+}
+
